@@ -1,0 +1,38 @@
+[package]
+name = "test-ai-helloworld"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rand = "0.8"
+rand_distr = "0.4"
+
+# v2 candle 改造:
+# Candle 核心库 - 提供 Tensor 和基础操作
+candle-core = { version = "0.9.1", features = ["metal", "accelerate"] }
+# Candle 神经网络库 - 提供层、优化器、损失函数等
+candle-nn = "0.9.1"
+
+# v3 FCN
+image = "0.24"
+mnist = { version = "0.6", features = ["download"] }
+
+# v4 CNN
+
+# v5 BERT / v6 MiniLM
+candle-transformers = "0.9.1"
+tokenizers = "0.21"  # 用于分词（Hugging Face tokenizer）
+anyhow = "1.0"
+serde_json = "1.0.145"
+safetensors="0.4.5"
+
+# v6 Transformer
+
+ai = {path = "crates/ai"}
+
+[profile.release]
+# 优化配置，提升运行速度
+opt-level = 3
+lto = true
+codegen-units = 1
+

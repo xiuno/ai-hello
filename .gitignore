@@ -1,0 +1,7 @@
+/target
+/data
+/tmp
+.DS_Store
+.idea
+models
+target
