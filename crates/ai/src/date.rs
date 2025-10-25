@@ -1,4 +1,12 @@
 // 日期相关的特性, features
+use chrono::NaiveDate;
+
+
+// todo: 这个方法看起来没有必要 "2010-10-01".parse() 就可以达到同样的目的.
+pub fn from_str(date_str: &str) -> std::result::Result<NaiveDate, Box<dyn std::error::Error>> {
+    let current_date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|_|"expect date format: %Y-%m-%d")?;
+    Ok(current_date)
+}
 
 pub mod holiday_feature {
     use chrono::{Datelike, NaiveDate, Weekday};
@@ -18,13 +26,13 @@ pub mod holiday_feature {
 
     impl TryFrom<&str> for DateFeature {
         type Error = Box<dyn std::error::Error>;
-        fn try_from(date: &str) -> Result<Self, Self::Error> {
-            from_date(date)
+        fn try_from(date_str: &str) -> Result<Self, Self::Error> {
+            Ok(from_date(date_str.parse()?))
         }
     }
 
-    pub fn from_date(date: &str) -> Result<DateFeature, Box<dyn std::error::Error>> {
-        let current_date = NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_|"expect date format: %Y-%m-%d")?;
+    pub fn from_date(date: NaiveDate) -> DateFeature {
+        let current_date = date;
 
         let is_national_day = is_national_day(&current_date);
         let is_spring_festival = is_spring_festival(&current_date);
@@ -57,7 +65,7 @@ pub mod holiday_feature {
             false
         };
 
-        Ok(DateFeature {
+        DateFeature {
             is_holiday: is_public_holiday,
             is_holiday_first_day: is_first_day,
             is_holiday_last_day: is_last_day,
@@ -66,7 +74,7 @@ pub mod holiday_feature {
             is_national_day,
             is_spring_festival,
             is_christmas: is_christmas(&current_date),
-        })
+        }
     }
 
     // 判断是否是公共假日类型（用于前后一天判断）
@@ -120,16 +128,16 @@ pub mod holiday_feature {
 
         #[test]
         fn test_national_day() {
-            let features = from_date("2023-10-01").unwrap();
+            let features = from_date("2023-10-1".parse().unwrap());
             assert!(features.is_national_day);
             assert!(features.is_holiday);
             assert!(features.is_holiday_first_day);
 
-            let features = from_date("2023-10-02").unwrap();
+            let features = from_date("2023-10-02".parse().unwrap());
             assert!(features.is_national_day);
             assert!(features.is_holiday);
 
-            let features = from_date("2023-10-07").unwrap();
+            let features = from_date("2023-10-07".parse().unwrap());
             assert!(features.is_national_day);
             assert!(features.is_holiday);
             assert!(features.is_holiday_last_day);
@@ -137,19 +145,19 @@ pub mod holiday_feature {
 
         #[test]
         fn test_weekend() {
-            let features = from_date("2023-10-14").unwrap(); // 周六
+            let features = from_date("2023-10-14".parse().unwrap()); // 周六
             assert!(features.is_holiday);
 
-            let features = from_date("2023-10-15").unwrap(); // 周日
+            let features = from_date("2023-10-15".parse().unwrap()); // 周日
             assert!(features.is_holiday);
 
-            let features = from_date("2023-10-16").unwrap(); // 周一
+            let features = from_date("2023-10-16".parse().unwrap()); // 周一
             assert!(!features.is_holiday);
         }
 
         #[test]
         fn test_christmas() {
-            let features = from_date("2023-12-25").unwrap();
+            let features = from_date("2023-12-25".parse().unwrap());
             assert!(features.is_christmas);
         }
     }
