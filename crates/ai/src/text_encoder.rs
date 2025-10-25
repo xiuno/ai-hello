@@ -46,9 +46,9 @@ impl TextEncoder {
         let mut ret = vec![];
         for sentence in sentences {
             let embedding = Self::encode_sentence(sentence.as_ref(), &self.tokenizer, &self.model, &self.device)?;
-            println!("Sentence: {}", sentence.as_ref());
-            println!("Embedding shape: {:?}", embedding.dims());
-            println!("First 5 dims: {:?}", embedding.to_vec1::<f32>()?[..5].to_vec());
+            // println!("Sentence: {}", sentence.as_ref());
+            // println!("Embedding shape: {:?}", embedding.dims());
+            // println!("First 5 dims: {:?}", embedding.to_vec1::<f32>()?[..5].to_vec());
             ret.push(embedding.to_vec1::<f32>()?);
         }
         Ok(ret)

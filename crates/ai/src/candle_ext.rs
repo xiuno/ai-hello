@@ -1,7 +1,17 @@
 use candle_core::{Tensor, IndexOp, Result};
+const MAX_ROWS: usize = 3;
+const MAX_COLS: usize = 8;
+
 pub trait TensorExt {
+    // 标准方差
     fn std_all(&self, dim: Option<usize>, keepdim: bool) -> Result<Tensor>;
+    // 打印向量维度, 数据, 平均方差, 标准方差, 余弦相似度
     fn print(&self, name: &str, stats: bool) -> anyhow::Result<()>;
+    // ✨ 新增：沿指定维度标准化（Z-score）
+    fn standardize(&self, dim: usize) -> Result<(Tensor, Tensor, Tensor)>;
+
+    // ✨ 新增：用给定 mean/std 还原
+    fn unstandardize(&self, mean: &Tensor, std: &Tensor) -> Result<Tensor>;
 }
 
 // 辅助函数：递归打印高维张量
@@ -44,7 +54,7 @@ fn print_high_dim_sample(
         }
     } else {
         // 还没到最后一维，继续递归
-        let elements_to_show = dims[depth].min(2);
+        let elements_to_show = dims[depth].min(MAX_ROWS);
 
         for i in 0..elements_to_show {
             let mut new_indices = current_indices.to_vec();
@@ -60,6 +70,44 @@ fn print_high_dim_sample(
     }
 
     Ok(())
+}
+
+
+fn cosine_sim_str(x: &Tensor) -> anyhow::Result<String> {
+    // 处理 [1, M, N] → [M, N]
+    let x = if let Ok((1, _, _)) = x.dims3() {
+        x.squeeze(0)?
+    } else {
+        x.clone()
+    };
+
+    // 必须是 2D 且至少两行
+    let (n_rows, _n_cols) = x.dims2().map_err(|_| anyhow::anyhow!("not 2D"))?;
+
+    if n_rows < 2 {
+        return Ok("".to_string());
+    }
+
+    let norms = x.sqr()?.sum_keepdim(1)?.sqrt()?;
+    let eps = Tensor::full(1e-8f64, norms.shape(), x.device())?.to_dtype(x.dtype())?;
+    let normalized = x.broadcast_div(&norms.maximum(&eps)?)?;
+    let sim_matrix = normalized.matmul(&normalized.t()?)?;
+
+    let sims = sim_matrix.to_vec2::<f32>()?;
+    let mut sum = 0.0f32;
+    let mut count = 0;
+    for i in 0..n_rows {
+        for j in (i + 1)..n_rows {
+            sum += sims[i][j];
+            count += 1;
+        }
+    }
+
+    if count == 0 {
+        Ok("".to_string())
+    } else {
+        Ok(format!("{:.4}", sum / count as f32))
+    }
 }
 
 impl TensorExt for Tensor {
@@ -89,11 +137,12 @@ impl TensorExt for Tensor {
     }
 
     fn print(&self, name: &str, stats: bool) -> anyhow::Result<()> {
-        let max_elements = 10;
         let stats_info = if stats {
             let mean_all = self.mean_all()?.to_vec0::<f32>()?;
             let std_all = self.std_all(None, true)?.to_vec0::<f32>()?;
-            format!(" (mean: {mean_all}, std: {std_all})")
+            let cosim = cosine_sim_str(self)?;
+            format!(" (mean: {:.4}, std: {:.4}{})",mean_all, std_all,
+                    (!cosim.is_empty()).then(||format!(", cossim: {cosim}")).unwrap_or_default())
         } else {
             "".to_string()
         };
@@ -114,27 +163,27 @@ impl TensorExt for Tensor {
             1 => {
                 // 1维张量：最多打印 max_elements 个元素
                 let data = self.to_vec1::<f32>()?;
-                let display_count = data.len().min(max_elements);
+                let display_count = data.len().min(MAX_COLS);
                 let display_data: Vec<f32> = data.iter().take(display_count).copied().collect();
-                if data.len() > max_elements {
+                if data.len() > MAX_COLS {
                     println!("{name}[..{}]:{stats_info} {:?}...", display_count, display_data);
                 } else {
                     println!("{name}:{stats_info} {:?}", display_data);
                 }
             }
             2 => {
-                // 2维张量：第一维最多打印3个，最后一维最多打印 max_elements 个
+                // 2维张量：第一维最多打印3个，最后一维最多打印 MAX_COLS 个
                 let dims = shape.dims();
-                let rows_to_show = dims[0].min(3);
+                let rows_to_show = dims[0].min(MAX_ROWS);
 
                 println!("{name}{:?}:{stats_info}", dims);
                 for i in 0..rows_to_show {
                     let row = self.i(i)?;
                     let row_data = row.to_vec1::<f32>()?;
-                    let display_count = row_data.len().min(max_elements);
+                    let display_count = row_data.len().min(MAX_COLS);
                     let display_data: Vec<f32> = row_data.iter().take(display_count).copied().collect();
 
-                    if row_data.len() > max_elements {
+                    if row_data.len() > MAX_COLS {
                         println!("  [{i}][..{}]: {:?}...", display_count, display_data);
                     } else {
                         println!("  [{i}]: {:?}", display_data);
@@ -146,20 +195,48 @@ impl TensorExt for Tensor {
                 }
             }
             _ => {
-                // 高维张量（>2维）：前面几维最多打印2个，最后一维最多打印 max_elements 个
+                // 高维张量（>2维）：前面几维最多打印2个，最后一维最多打印 MAX_COLS 个
                 let dims = shape.dims();
                 println!("{name}{:?}:{stats_info}", dims);
 
                 // 递归打印高维张量的前2个元素
-                print_high_dim_sample(self, name, &[], dims, max_elements, 0)?;
+                print_high_dim_sample(self, name, &[], dims, MAX_COLS, 0)?;
             }
         }
 
         Ok(())
     }
 
+    // 🔧 标准化：返回 (normalized, mean, std)
+    // let (targets_norm, mean, std) = targets.standardize(0)?;
+    fn standardize(&self, dim: usize) -> Result<(Tensor, Tensor, Tensor)> {
+        let mean = self.mean(dim)?;
+        let centered = self.broadcast_sub(&mean)?;
+        let var = centered.sqr()?.mean(dim)?;
+        let std = var.sqrt()?;
 
+        // 防止除零
+        let eps = 1e-8f32;
+        let device = std.device();
+        let eps_tensor = Tensor::new(eps, device)?.broadcast_as(std.shape())?;
+        let std = std.maximum(&eps_tensor)?;
+
+        let normalized = centered.broadcast_div(&std)?;
+        Ok((normalized, mean, std))
+    }
+
+    // 🔧 还原标准化
+    // let final_pred = final_pred_norm.unstandardize(&mean, &std)?;
+    fn unstandardize(&self, mean: &Tensor, std: &Tensor) -> Result<Tensor> {
+        let scaled = self.broadcast_mul(std)?;
+        scaled.broadcast_add(mean)
+    }
 }
+
+
+// use candle_core::{Device, DType};
+/// 对 [N, D] 张量沿第0维（样本维度）做 Z-score 标准化
+/// 返回 (normalized_tensor, mean, std)
 
 #[cfg(test)]
 mod tests {
@@ -167,8 +244,30 @@ mod tests {
     use candle_core::{DType, Device};
     #[test]
     fn test_print_tensor() {
-        let tensor1 = Tensor::zeros((2, 3), DType::F32, &Device::Cpu).unwrap();
+        let tensor1 = Tensor::zeros((5, 10, 10), DType::F32, &Device::Cpu).unwrap();
         tensor1.print("test", false).unwrap();
+    }
+    #[test]
+    fn test_print_sim() -> anyhow::Result<()> {
+        let device = Device::Cpu;
+
+        // 构造两个明显不同的向量：一个偏正，一个偏负
+        let row1 = vec![1.0f32, 22.0, 13.0, 5.0];
+        let row2 = vec![-1.0, -22.0, -13.0, -5.0];
+        // let row2 = vec![-11.0f32, -21.0, -3.0, 400.0];
+        let data = [row1, row2].concat(); // [1,2,3,4,-1,-2,-3,-4]
+
+        // 测试 2D: [2, 4]
+        let tensor_2d = Tensor::from_vec(data.clone(), (2, 4), &device)?;
+        //println!("--- Testing 2D input ---");
+        tensor_2d.print("2D", true)?;
+
+        // 测试 3D with batch=1: [1, 2, 4]
+        let tensor_3d = Tensor::from_vec(data, (1, 2, 4), &device)?;
+        //println!("\n--- Testing [1,2,4] input ---");
+        tensor_3d.print("3D", true)?;
+
+        Ok(())
     }
     #[test]
     fn test_std_all() -> Result<()> {

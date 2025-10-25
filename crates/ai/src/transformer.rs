@@ -40,7 +40,7 @@ impl MultiHeadAttention {
 
     fn forward(&self, x: &Tensor, mask: Option<&Tensor>) -> Result<Tensor> {
         // seq_len = 6, 对应维度为 L
-        let (batchs, seq_len, d_model) = x.dims3()?;
+        let (batch_size, seq_len, d_model) = x.dims3()?;
 
         assert_eq!(
             d_model,
@@ -53,7 +53,7 @@ impl MultiHeadAttention {
         let q = self
             .q_proj
             .forward(x)?
-            .reshape((batchs, seq_len, self.num_heads, self.head_dim))?
+            .reshape((batch_size, seq_len, self.num_heads, self.head_dim))?
             .transpose(1, 2)?
             .contiguous()?; // transpose 惰性改变, 合并以后, 一次性 contiguous() 物理移动.
 
@@ -61,7 +61,7 @@ impl MultiHeadAttention {
         let k = self
             .k_proj
             .forward(x)?
-            .reshape((batchs, seq_len, self.num_heads, self.head_dim))?
+            .reshape((batch_size, seq_len, self.num_heads, self.head_dim))?
             .transpose(1, 2)?
             .contiguous()?;
 
@@ -69,7 +69,7 @@ impl MultiHeadAttention {
         let v = self
             .v_proj
             .forward(x)?
-            .reshape((batchs, seq_len, self.num_heads, self.head_dim))?
+            .reshape((batch_size, seq_len, self.num_heads, self.head_dim))?
             .transpose(1, 2)?
             .contiguous()?;
 
@@ -85,13 +85,13 @@ impl MultiHeadAttention {
         // 应用 mask（如果有）, 股票预测不需要.
         // 应用 padding mask（如果有）
         let attn_scores = if let Some(mask) = mask {
-            // mask: [B, L]，1=real, 0=pad
-            // 扩展为 [B, 1, 1, L] 以便广播到 [B, H, L, L]
+            // mask: [B, L], 1=valid, 0=pad
             let mask = mask.unsqueeze(1)?.unsqueeze(1)?; // [B, 1, 1, L]
-            // 将 pad 位置设为极小值（如 -1e9），使 softmax 后接近 0
-            let neg_inf = Tensor::new(-1e9f32, x.device())?.broadcast_as(mask.shape())?;
-            let mask = mask.where_cond(&Tensor::zeros_like(&mask)?, &neg_inf)?;
-            attn_scores.broadcast_add(&mask)?
+            let neg_inf = Tensor::new(f32::NEG_INFINITY, x.device())?
+                .broadcast_as(attn_scores.shape())?;
+            // 将 mask 扩展到 [B, H, L, L]
+            let mask = mask.broadcast_as(attn_scores.shape())?;
+            mask.where_cond(&attn_scores, &neg_inf)?
         } else {
             attn_scores
         };
@@ -105,7 +105,7 @@ impl MultiHeadAttention {
         // 合并多头 [B, L, heads x head_dim]
         let attn_output = attn_output
             .transpose(1, 2)? // [B, num_heads L, head_dim] -> [B, L, heads, head_dim]
-            .reshape((batchs, seq_len, d_model))?; // [B, L, heads x head_dim]
+            .reshape((batch_size, seq_len, d_model))?; // [B, L, heads x head_dim]
 
         // 输出投影
         self.out_proj.forward(&attn_output)
@@ -152,8 +152,9 @@ impl TransformerEncoderLayer {
     ) -> Result<Self> {
         let self_attn = MultiHeadAttention::new(d_model, heads, vb.pp("self_attn"))?;
         let ffn = FeedForward::new(d_model, d_ff, vb.pp("ffn"))?;
-        let norm1 = layer_norm(d_model, 1e-5, vb.pp("norm1"))?;
-        let norm2 = layer_norm(d_model, 1e-5, vb.pp("norm2"))?;
+        // todo: 这里与 MiniML 保持一致: 使用 1e-12, 而非 1e-5
+        let norm1 = layer_norm(d_model, 1e-12, vb.pp("norm1"))?;
+        let norm2 = layer_norm(d_model, 1e-12, vb.pp("norm2"))?;
 
         Ok(Self {
             self_attn,
