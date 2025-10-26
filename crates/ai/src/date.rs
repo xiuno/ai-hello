@@ -1,15 +1,117 @@
-// 日期相关的特性, features
-use chrono::NaiveDate;
+/*
+    BTC 全球市场, 使用 DateTime<Utc>
+    股票市场, 转成股票所在国家的时区. 这样会导致非常复杂的状态, 所以对于中小项目必须简化.
+    简化一下:
+    全部转为中国的时区. 使用 NaiveDate, 其他时区的新闻转为中国时区, 然后再转成 NaiveDate
+    转化方法:
+    let japan_time1_utc: DateTime<Utc> = "2025-10-27 08:00:00 +07:00".parse().unwrap();
+    let china_time_utc = japan_time1_utc.with_timezone(&FixedOffset::east(8*3600))); // 转成中国时区
+ */
 
+pub mod prepare {
+    use chrono::{DateTime, NaiveDateTime, TimeZone, Utc, Datelike, Timelike};
+    pub fn parse_to_utc(input: &str) -> Result<DateTime<Utc>, String> {
+        // Replace / with - for consistent format
+        let input = input.replace("/", "-");
 
-// todo: 这个方法看起来没有必要 "2010-10-01".parse() 就可以达到同样的目的.
-pub fn from_str(date_str: &str) -> std::result::Result<NaiveDate, Box<dyn std::error::Error>> {
-    let current_date = NaiveDate::parse_from_str(date_str, "%Y-%m-%d").map_err(|_|"expect date format: %Y-%m-%d")?;
-    Ok(current_date)
+        // Try parsing with chrono's built-in UTC parser first
+        if let Ok(dt) = input.parse::<DateTime<Utc>>() {
+            return Ok(dt);
+        }
+
+        // Try parsing with explicit timezone (e.g., +08:00 or +0800)
+        for format in &[
+            "%Y-%m-%d %H:%M:%S%#z",
+            "%Y-%m-%d %H:%M%#z",
+            "%Y-%m-%dT%H:%M:%S%#z",
+            "%Y-%m-%dT%H:%M%#z",
+        ] {
+            if let Ok(dt) = DateTime::parse_from_str(&input, format) {
+                return Ok(dt.with_timezone(&Utc));
+            }
+        }
+
+        // Try parsing without timezone (default to +08:00)
+        for format in &[
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%dT%H:%M",
+        ] {
+            if let Ok(ndt) = NaiveDateTime::parse_from_str(&input, format) {
+                let local_dt = chrono::FixedOffset::east_opt(8 * 3600)
+                    .unwrap()
+                    .from_local_datetime(&ndt)
+                    .unwrap();
+                return Ok(local_dt.with_timezone(&Utc));
+            }
+        }
+
+        // Handle date-only format separately
+        if let Ok(nd) = chrono::NaiveDate::parse_from_str(&input, "%Y-%m-%d") {
+            let ndt = nd.and_hms_opt(0, 0, 0).unwrap();
+            let local_dt = chrono::FixedOffset::east_opt(8 * 3600)
+                .unwrap()
+                .from_local_datetime(&ndt)
+                .unwrap();
+            return Ok(local_dt.with_timezone(&Utc));
+        }
+
+        // Handle special case: "YYYY-MM-DD HH:MM:SS HH:MM" or "YYYY-MM-DD HH:MM HH:MM"
+        let parts: Vec<&str> = input.split_whitespace().collect();
+        if parts.len() == 3 {
+            let base = parts[0..2].join(" ");
+            let tz = parts[2];
+            let tz_format = if tz.contains(':') { "%H:%M" } else { "%H%M" };
+            if let Ok(offset) = chrono::NaiveTime::parse_from_str(tz, tz_format) {
+                let offset_secs = offset.num_seconds_from_midnight() as i32;
+                for format in &["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"] {
+                    if let Ok(ndt) = NaiveDateTime::parse_from_str(&base, format) {
+                        let local_dt = chrono::FixedOffset::east_opt(offset_secs)
+                            .unwrap()
+                            .from_local_datetime(&ndt)
+                            .unwrap();
+                        return Ok(local_dt.with_timezone(&Utc));
+                    }
+                }
+            }
+        }
+
+        Err(format!("Unable to parse datetime: {}", input))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use chrono::{TimeZone, Utc};
+
+        #[test]
+        fn test_parse_to_utc() {
+            let cases = vec![
+                ("2025/10/24", Utc.with_ymd_and_hms(2025, 10, 23, 16, 0, 0).unwrap()), // +08 → UTC -8h
+                ("2025/10/24 13:53", Utc.with_ymd_and_hms(2025, 10, 24, 5, 53, 0).unwrap()), // +08 → UTC -8h
+                ("2025/10/24 13:53:00", Utc.with_ymd_and_hms(2025, 10, 24, 5, 53, 0).unwrap()),
+                ("2025/10/24T13:53", Utc.with_ymd_and_hms(2025, 10, 24, 5, 53, 0).unwrap()),
+                ("2025/10/24T13:53+08:00", Utc.with_ymd_and_hms(2025, 10, 24, 5, 53, 0).unwrap()),
+                ("2025/10/24 13:53 07:00", Utc.with_ymd_and_hms(2025, 10, 24, 6, 53, 0).unwrap()), // 07:00 → UTC +7 → 13:53-7=6:53 UTC
+                ("2025-10-24", Utc.with_ymd_and_hms(2025, 10, 23, 16, 0, 0).unwrap()), // +08 → UTC -8h
+                ("2025-10-24 13:12", Utc.with_ymd_and_hms(2025, 10, 24, 5, 12, 0).unwrap()),
+                ("2025-10-24 13:12:13", Utc.with_ymd_and_hms(2025, 10, 24, 5, 12, 13).unwrap()),
+                ("2025-10-24T13:12:13", Utc.with_ymd_and_hms(2025, 10, 24, 5, 12, 13).unwrap()),
+                ("2025-10-24T13:12:13+07:00", Utc.with_ymd_and_hms(2025, 10, 24, 6, 12, 13).unwrap()),
+                ("2025-10-24 13:12:13 07:00", Utc.with_ymd_and_hms(2025, 10, 24, 6, 12, 13).unwrap()),
+            ];
+
+            for (input, expected) in cases {
+                let result = parse_to_utc(input).unwrap();
+                assert_eq!(result, expected, "Failed on input: {}", input);
+            }
+        }
+    }
 }
 
 pub mod holiday_feature {
-    use chrono::{Datelike, NaiveDate, Weekday};
+    use chrono::{Datelike, FixedOffset, NaiveDate, NaiveDateTime, Weekday};
 
     #[allow(dead_code)]
     #[derive(Debug, Default, Clone)]
@@ -24,11 +126,25 @@ pub mod holiday_feature {
         pub is_christmas: bool,         // 圣诞节
     }
 
+    // 支持各种字符串格式转成该结构体
+    // 2025-12-01
+    // 2025/12/01
+    // 2025-12-01 12:00
+    // 2025-12-01 12:00:00
+    // 2025-12-01T12:00:00
+    // 2025-12-01T12:00:00+0800
     impl TryFrom<&str> for DateFeature {
         type Error = Box<dyn std::error::Error>;
         fn try_from(date_str: &str) -> Result<Self, Self::Error> {
-            Ok(from_date(date_str.parse()?))
+            let datetime_utc = super::prepare::parse_to_utc(date_str)?;
+            let naive_datetime = datetime_utc.with_timezone(&FixedOffset::east_opt(8*3600).unwrap()).naive_local();
+            Ok(from_date_time(naive_datetime))
         }
+    }
+
+    pub fn from_date_time(date: NaiveDateTime) -> DateFeature {
+        let current_date = date.date();
+        from_date(current_date)
     }
 
     pub fn from_date(date: NaiveDate) -> DateFeature {
@@ -128,44 +244,46 @@ pub mod holiday_feature {
 
         #[test]
         fn test_national_day() {
-            let features = from_date("2023-10-1".parse().unwrap());
-            assert!(features.is_national_day);
-            assert!(features.is_holiday);
-            assert!(features.is_holiday_first_day);
+            // let feature = from_date_time("2012-10-01T00:00:00".parse().unwrap());
+            let feature = DateFeature::try_from("2012-10-01").unwrap();
+            //let feature = from_date("2012-10-01".parse().unwrap());
+            assert!(feature.is_national_day);
+            assert!(feature.is_holiday);
+            assert!(feature.is_holiday_first_day);
 
-            let features = from_date("2023-10-02".parse().unwrap());
-            assert!(features.is_national_day);
-            assert!(features.is_holiday);
+            let feature = from_date("2023-10-02".parse().unwrap());
+            assert!(feature.is_national_day);
+            assert!(feature.is_holiday);
 
-            let features = from_date("2023-10-07".parse().unwrap());
-            assert!(features.is_national_day);
-            assert!(features.is_holiday);
-            assert!(features.is_holiday_last_day);
+            let feature = from_date("2023-10-07".parse().unwrap());
+            assert!(feature.is_national_day);
+            assert!(feature.is_holiday);
+            assert!(feature.is_holiday_last_day);
         }
 
         #[test]
         fn test_weekend() {
-            let features = from_date("2023-10-14".parse().unwrap()); // 周六
-            assert!(features.is_holiday);
+            let feature = from_date("2023-10-14".parse().unwrap()); // 周六
+            assert!(feature.is_holiday);
 
-            let features = from_date("2023-10-15".parse().unwrap()); // 周日
-            assert!(features.is_holiday);
+            let feature = from_date("2023-10-15".parse().unwrap()); // 周日
+            assert!(feature.is_holiday);
 
-            let features = from_date("2023-10-16".parse().unwrap()); // 周一
-            assert!(!features.is_holiday);
+            let feature = from_date("2023-10-16".parse().unwrap()); // 周一
+            assert!(!feature.is_holiday);
         }
 
         #[test]
         fn test_christmas() {
-            let features = from_date("2023-12-25".parse().unwrap());
-            assert!(features.is_christmas);
+            let feature = from_date("2023-12-25".parse().unwrap());
+            assert!(feature.is_christmas);
         }
     }
 }
 
 // 将日期转成周期性值
 pub mod cycle_feature {
-    use chrono::{NaiveDate, Datelike};
+    use chrono::{NaiveDate, Datelike, NaiveDateTime, FixedOffset};
 
     /// 将日期转换为周期性编码的6维向量
     /// 返回格式: [dow_sin, dow_cos, dom_sin, dom_cos, month_sin, month_cos]
@@ -177,6 +295,27 @@ pub mod cycle_feature {
         pub month_sin: f32,
         pub month_cos: f32,
     }
+
+    // 支持各种字符串格式转成该结构体
+    // 2025-12-01
+    // 2025/12/01
+    // 2025-12-01 12:00
+    // 2025-12-01 12:00:00
+    // 2025-12-01T12:00:00
+    // 2025-12-01T12:00:00+0800
+    impl TryFrom<&str> for DateFeature {
+        type Error = Box<dyn std::error::Error>;
+        fn try_from(date_str: &str) -> Result<Self, Self::Error> {
+            let datetime_utc = super::prepare::parse_to_utc(date_str)?;
+            let naive_datetime = datetime_utc.with_timezone(&FixedOffset::east_opt(8*3600).unwrap()).naive_local();
+            Ok(from_date_time(naive_datetime))
+        }
+    }
+    pub fn from_date_time(date: NaiveDateTime) -> DateFeature {
+        let current_date = date.date();
+        from_date(current_date)
+    }
+
     pub fn from_date(date: NaiveDate) -> DateFeature {
         let day_of_week = date.weekday().num_days_from_monday() as f32; // 0-6 (周一至周日)
         let day_of_month = (date.day() - 1) as f32; // 0-30 (0-based)
