@@ -1,7 +1,11 @@
-/target
-/data
-/tmp
+target
+data
+tmp
+tools
 .DS_Store
 .idea
 models
 target
+*.parquet
+*.safetensors
+*.csv

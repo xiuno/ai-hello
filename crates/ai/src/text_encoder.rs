@@ -145,3 +145,11 @@ fn test_1() {
     let r = textencoder.encode(sentences).unwrap();
     println!("{:?}", r);
 }
+
+pub mod qwen {
+    /*
+    huggingface-cli download Qwen/Qwen2.5-1.5B-Instruct \
+    --include "*.safetensors" "*.json" "*.txt" \
+    --local-dir ./models/qwen
+     */
+}

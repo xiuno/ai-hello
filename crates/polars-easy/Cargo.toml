@@ -1,0 +1,7 @@
+[package]
+name = "polars-easy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+polars = { version = "0.51.0", features = ["parquet", "csv", "json", "lazy"] }

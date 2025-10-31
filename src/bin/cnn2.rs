@@ -3,7 +3,7 @@ use candle_nn::{loss, ops, Conv2d, Linear, BatchNorm, Optimizer, VarBuilder, Var
 
 fn load_mnist_tensors(device: &Device) -> Result<(Tensor, Tensor, Tensor, Tensor)> {
     let mnist = mnist::MnistBuilder::new()
-        .base_path("data/")
+        .base_path("data/minist")
         //.download_and_extract()
         .finalize();
 

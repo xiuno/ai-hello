@@ -48,7 +48,7 @@ impl MultiHeadAttention {
             "d_model must equal num_heads * head_dim"
         );
 
-        // 投影并重塑为多头形状
+        // 投影并重塑为多头形状 8*48 = 384
         // [B, num_heads L, head_dim] [2, 8, 10, 48]
         let q = self
             .q_proj
@@ -79,7 +79,7 @@ impl MultiHeadAttention {
         //  [B, num_heads L, head_dim] x [B, num_heads head_dim, L] = [B, num_heads L, L]
         // 对 k 最后两个维度进行转置. q x k^T
         let attn_scores = q.matmul(&k.transpose(D::Minus1, D::Minus2)?)?;
-        // .affine(scale, bias) --> x * scale + bias
+        // .affine(scale, bias) --> x * scale + bias 对每一个元素应用缩放+偏置
         let attn_scores = attn_scores.affine(1.0 / scale, 0.0)?; // [B, num_heads L, L]
 
         // 应用 mask（如果有）, 股票预测不需要.
@@ -96,7 +96,7 @@ impl MultiHeadAttention {
             attn_scores
         };
 
-        // Softmax  [B, num_heads L, L] 形状不变
+        // Softmax  [B, num_heads L, L] 形状不变, 归一化
         let attn_weights = candle_nn::ops::softmax_last_dim(&attn_scores)?;
 
         // 应用注意力权重到 V, [B, num_heads L, L] x [B, num_heads L, head_dim] = [B, num_heads L, head_dim]

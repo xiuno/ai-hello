@@ -9,7 +9,7 @@
  */
 
 pub mod prepare {
-    use chrono::{DateTime, NaiveDateTime, TimeZone, Utc, Datelike, Timelike};
+    use chrono::{DateTime, NaiveDateTime, TimeZone, Utc, Timelike};
     pub fn parse_to_utc(input: &str) -> Result<DateTime<Utc>, String> {
         // Replace / with - for consistent format
         let input = input.replace("/", "-");
@@ -115,7 +115,7 @@ pub mod holiday_feature {
 
     #[allow(dead_code)]
     #[derive(Debug, Default, Clone)]
-    pub struct DateFeature {
+    pub struct HolidayFeature {
         pub is_holiday: bool,           // 普通假日, 周末
         pub is_holiday_first_day: bool, // 假期第一天
         pub is_holiday_last_day: bool,  // 假期最后一天
@@ -133,7 +133,7 @@ pub mod holiday_feature {
     // 2025-12-01 12:00:00
     // 2025-12-01T12:00:00
     // 2025-12-01T12:00:00+0800
-    impl TryFrom<&str> for DateFeature {
+    impl TryFrom<&str> for HolidayFeature {
         type Error = Box<dyn std::error::Error>;
         fn try_from(date_str: &str) -> Result<Self, Self::Error> {
             let datetime_utc = super::prepare::parse_to_utc(date_str)?;
@@ -142,12 +142,12 @@ pub mod holiday_feature {
         }
     }
 
-    pub fn from_date_time(date: NaiveDateTime) -> DateFeature {
+    pub fn from_date_time(date: NaiveDateTime) -> HolidayFeature {
         let current_date = date.date();
         from_date(current_date)
     }
 
-    pub fn from_date(date: NaiveDate) -> DateFeature {
+    pub fn from_date(date: NaiveDate) -> HolidayFeature {
         let current_date = date;
 
         let is_national_day = is_national_day(&current_date);
@@ -181,7 +181,7 @@ pub mod holiday_feature {
             false
         };
 
-        DateFeature {
+        HolidayFeature {
             is_holiday: is_public_holiday,
             is_holiday_first_day: is_first_day,
             is_holiday_last_day: is_last_day,
@@ -245,7 +245,7 @@ pub mod holiday_feature {
         #[test]
         fn test_national_day() {
             // let feature = from_date_time("2012-10-01T00:00:00".parse().unwrap());
-            let feature = DateFeature::try_from("2012-10-01").unwrap();
+            let feature = HolidayFeature::try_from("2012-10-01").unwrap();
             //let feature = from_date("2012-10-01".parse().unwrap());
             assert!(feature.is_national_day);
             assert!(feature.is_holiday);
@@ -287,7 +287,7 @@ pub mod cycle_feature {
 
     /// 将日期转换为周期性编码的6维向量
     /// 返回格式: [dow_sin, dow_cos, dom_sin, dom_cos, month_sin, month_cos]
-    pub struct DateFeature {
+    pub struct CycleFeature {
         pub dow_sin: f32,
         pub dow_cos: f32,
         pub dom_sin: f32,
@@ -303,7 +303,7 @@ pub mod cycle_feature {
     // 2025-12-01 12:00:00
     // 2025-12-01T12:00:00
     // 2025-12-01T12:00:00+0800
-    impl TryFrom<&str> for DateFeature {
+    impl TryFrom<&str> for CycleFeature {
         type Error = Box<dyn std::error::Error>;
         fn try_from(date_str: &str) -> Result<Self, Self::Error> {
             let datetime_utc = super::prepare::parse_to_utc(date_str)?;
@@ -311,12 +311,12 @@ pub mod cycle_feature {
             Ok(from_date_time(naive_datetime))
         }
     }
-    pub fn from_date_time(date: NaiveDateTime) -> DateFeature {
+    pub fn from_date_time(date: NaiveDateTime) -> CycleFeature {
         let current_date = date.date();
         from_date(current_date)
     }
 
-    pub fn from_date(date: NaiveDate) -> DateFeature {
+    pub fn from_date(date: NaiveDate) -> CycleFeature {
         let day_of_week = date.weekday().num_days_from_monday() as f32; // 0-6 (周一至周日)
         let day_of_month = (date.day() - 1) as f32; // 0-30 (0-based)
         let month = (date.month() - 1) as f32;      // 0-11 (0-based)
@@ -331,7 +331,7 @@ pub mod cycle_feature {
         let month_sin = (2.0 * std::f32::consts::PI * month / 12.0).sin();
         let month_cos = (2.0 * std::f32::consts::PI * month / 12.0).cos();
 
-        DateFeature {
+        CycleFeature {
             dow_sin,
             dow_cos,
             dom_sin,
@@ -342,7 +342,7 @@ pub mod cycle_feature {
     }
 
     /// 批量日期编码，便于Tensor构建
-    pub fn from_date_vec(dates: &[NaiveDate]) -> Vec<DateFeature> {
+    pub fn from_date_vec(dates: &[NaiveDate]) -> Vec<CycleFeature> {
         dates.iter().map(|&date| from_date(date)).collect()
     }
 
